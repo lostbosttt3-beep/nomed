@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>نظام المخزون المتكامل</title>
+    
+    <!-- المكتبات -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <!-- مكتبة Excel -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;900&display=swap');
+
+        body { 
+            font-family: 'Cairo', sans-serif; 
+            background: linear-gradient(135deg, #f0f4f8 0%, #e2e8f0 100%);
+            min-height: 100vh;
+            padding-bottom: 90px; 
+            -webkit-tap-highlight-color: transparent; 
+            overscroll-behavior-y: none; 
+        }
+        
+        .num-en { font-family: 'Segoe UI', sans-serif; direction: ltr; display: inline-block; }
+        
+        ::-webkit-scrollbar { width: 0px; background: transparent; }
+        
+        /* تصميم البطاقات الزجاجي */
+        .glass-card { 
+            background: rgba(255, 255, 255, 0.95); 
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            border-radius: 12px; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.03); 
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .glass-card:active { transform: scale(0.99); }
+        
+        /* زر عائم بتدرج لوني */
+        .fab {
+            position: fixed; bottom: 90px; left: 20px; width: 55px; height: 55px;
+            background: linear-gradient(135deg, #3b82f6, #2563eb); color: white; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 10px 25px -5px rgba(37, 99, 235, 0.6); z-index: 50;
+            font-size: 22px; transition: 0.3s;
+        }
+        .fab:hover { transform: translateY(-3px) rotate(90deg); }
+
+        /* القائمة السفلية */
+        .nav-bar {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-top: 1px solid rgba(226, 232, 240, 0.8);
+        }
+        .nav-item.active { color: #2563eb; position: relative; }
+        .nav-item.active::after {
+            content: ''; position: absolute; bottom: -5px; width: 5px; height: 5px;
+            background: #2563eb; border-radius: 50%;
+        }
+        .nav-item { color: #94a3b8; transition: 0.3s; }
+
+        .pin-active { color: #f59e0b; transform: rotate(45deg); }
+        .pin-inactive { color: #cbd5e1; }
+
+        /* تنسيق تفاصيل السجل */
+        .log-details {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+            background-color: #f8fafc;
+        }
+        .log-details.open {
+            max-height: 500px;
+            border-top: 1px dashed #cbd5e1;
+        }
+        .rotate-icon { transition: transform 0.3s; }
+        .rotate-icon.rotated { transform: rotate(180deg); }
+    </style>
+</head>
+<body>
+
+    <!-- الرأس -->
+    <header class="bg-gradient-to-r from-blue-700 to-indigo-600 px-4 py-3 sticky top-0 z-40 shadow-md rounded-b-[20px]">
+        <div class="flex justify-between items-center text-white">
+            <div class="flex flex-col justify-center">
+                <h1 class="text-lg font-bold tracking-wide leading-tight" id="app-title-display">المخزون</h1>
+                <p class="text-[10px] text-blue-100 opacity-80" id="current-date"></p>
+            </div>
+            <div class="bg-white/20 backdrop-blur-md px-3 py-1 rounded-lg border border-white/30 flex items-center gap-2">
+                <span class="text-[10px] opacity-90">المجموع:</span>
+                <span class="num-en font-bold text-sm" id="total-items-badge">0</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="px-3 container mx-auto max-w-2xl mt-3">
+        
+        <!-- 1. واجهة المخزون -->
+        <section id="view-inventory" class="view-section">
+            <div class="glass-card p-2 mb-3 flex gap-2 sticky top-[70px] z-30 shadow-sm items-center">
+                <div class="relative flex-1">
+                    <input type="text" id="search-input" onkeyup="app.renderInventory()" placeholder="بحث سريع..." class="w-full bg-gray-50 p-2 pr-8 rounded-lg border border-gray-200 outline-none focus:border-blue-400 text-xs">
+                    <i class="fa-solid fa-search absolute top-2.5 right-2.5 text-gray-400 text-xs"></i>
+                </div>
+                <select id="sort-select" onchange="app.renderInventory()" class="bg-gray-50 border border-gray-200 text-gray-600 text-[10px] rounded-lg px-1 h-9 outline-none w-20">
+                    <option value="pinned">المثبت</option>
+                    <option value="recent">الأحدث</option>
+                    <option value="qty_asc">الأقل عدداً</option>
+                    <option value="qty_desc">الأكثر عدداً</option>
+                    <option value="alert">النواقص</option>
+                </select>
+            </div>
+
+            <div id="inventory-list" class="grid grid-cols-2 md:grid-cols-3 gap-2 pb-20"></div>
+            
+            <div id="empty-state" class="hidden flex flex-col items-center justify-center mt-10 text-gray-400 opacity-60">
+                <i class="fa-solid fa-box-open text-5xl mb-3 text-gray-300"></i>
+                <p class="text-xs font-bold">المخزن فارغ</p>
+            </div>
+        </section>
+
+        <!-- 2. واجهة السجل -->
+        <section id="view-logs" class="view-section hidden">
+            <div class="flex justify-between items-center mb-3 px-1">
+                <h3 class="font-bold text-gray-800 text-sm">سجل الصادرات</h3>
+                <button onclick="app.clearAllLogs()" class="text-red-500 bg-red-50 px-3 py-1 rounded-full text-[10px] font-bold hover:bg-red-100 transition">
+                    <i class="fa-solid fa-trash-can"></i> مسح السجل
+                </button>
+            </div>
+            
+            <div class="relative mb-3">
+                <input type="text" id="log-search" onkeyup="app.renderLogs()" placeholder="بحث في السجل..." class="w-full glass-card p-2 pr-9 outline-none text-xs">
+                <i class="fa-solid fa-search absolute top-2.5 right-3 text-gray-400 text-xs"></i>
+            </div>
+
+            <div id="logs-list" class="space-y-2 pb-20"></div>
+        </section>
+
+        <!-- 3. واجهة الإعدادات -->
+        <section id="view-settings" class="view-section hidden space-y-3 pb-20">
+            
+            <!-- التصدير الجماعي -->
+            <div class="glass-card p-4 border-r-4 border-amber-500 bg-amber-50/30">
+                <h3 class="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm">
+                    <i class="fa-solid fa-dolly text-amber-500"></i> التصدير الجماعي
+                </h3>
+                <p class="text-[10px] text-gray-500 mb-3 leading-relaxed">
+                    استخدم هذه الميزة لبيع أو إخراج مجموعة من المنتجات دفعة واحدة مع سبب موحد.
+                </p>
+                <button onclick="app.openBulkExportModal()" class="w-full bg-amber-500 text-white py-2.5 rounded-xl text-sm font-bold shadow-md shadow-amber-200 hover:bg-amber-600 transition flex justify-center items-center gap-2">
+                    <i class="fa-solid fa-cart-arrow-down"></i> بدء تصدير متعدد
+                </button>
+            </div>
+
+            <!-- إعدادات التطبيق -->
+            <div class="glass-card p-4">
+                <h3 class="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm">
+                    <i class="fa-solid fa-sliders text-blue-500"></i> الإعدادات العامة
+                </h3>
+                <div class="space-y-2">
+                    <div>
+                        <label class="text-[10px] text-gray-500 block mb-1">اسم التطبيق</label>
+                        <input type="text" id="setting-app-name" onchange="app.saveSettings()" class="w-full p-2 border rounded-lg text-xs bg-gray-50">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Excel -->
+            <div class="glass-card p-4 border-l-4 border-green-500">
+                <h3 class="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm">
+                    <i class="fa-solid fa-file-excel text-green-600"></i> ملفات إكسل (Excel)
+                </h3>
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="relative group">
+                        <button class="w-full bg-green-50 text-green-700 py-2 rounded-lg text-xs font-bold border border-green-200 hover:bg-green-100 transition">
+                            <i class="fa-solid fa-file-import mb-1 block text-base"></i> استيراد
+                        </button>
+                        <input type="file" id="excel-file" accept=".xlsx, .xls" onchange="app.importExcel(this)" class="absolute inset-0 opacity-0 cursor-pointer">
+                    </div>
+                    <button onclick="app.exportExcel()" class="w-full bg-blue-50 text-blue-700 py-2 rounded-lg text-xs font-bold border border-blue-200 hover:bg-blue-100 transition">
+                        <i class="fa-solid fa-file-export mb-1 block text-base"></i> تصدير
+                    </button>
+                </div>
+            </div>
+
+            <!-- إدارة الأصناف -->
+            <div class="glass-card p-4">
+                <h3 class="font-bold text-gray-800 mb-2 text-sm">إدارة الأصناف & التنبيهات</h3>
+                <div class="flex gap-2 mb-3">
+                    <input type="text" id="new-cat" placeholder="صنف جديد..." class="flex-1 p-2 border rounded-lg text-xs bg-gray-50">
+                    <button onclick="app.addCategory()" class="bg-gray-800 text-white px-3 rounded-lg text-xs">إضافة</button>
+                </div>
+                <div id="categories-list" class="flex flex-wrap gap-1 mb-4"></div>
+
+                <div class="border-t pt-3 flex justify-between items-center">
+                    <div>
+                        <h3 class="font-bold text-gray-800 text-xs">حد النواقص</h3>
+                        <p class="text-[9px] text-gray-400">تنبيه عندما يقل عن:</p>
+                    </div>
+                    <input type="number" id="setting-threshold" onchange="app.saveSettings()" class="w-14 p-1.5 border rounded-lg text-center font-bold text-sm num-en bg-gray-50" value="5">
+                </div>
+            </div>
+
+            <!-- منطقة الخطر -->
+            <div class="glass-card p-4 border-red-100 border bg-red-50/20">
+                <h3 class="font-bold text-red-600 mb-2 text-xs"><i class="fa-solid fa-triangle-exclamation"></i> منطقة الخطر</h3>
+                <button onclick="app.resetSystem()" class="w-full bg-white border border-red-200 text-red-500 py-2 rounded-lg text-xs font-bold hover:bg-red-500 hover:text-white transition">
+                    فرمتة النظام بالكامل
+                </button>
+            </div>
+
+            <!-- الحقوق -->
+            <div class="text-center mt-6 mb-2 opacity-60">
+                <p class="text-[10px] text-gray-500 font-bold">جميع الحقوق محفوظة © مصعب</p>
+            </div>
+        </section>
+    </main>
+
+    <!-- زر الإضافة العائم -->
+    <button onclick="app.openProductModal()" id="fab-add" class="fab"><i class="fa-solid fa-plus"></i></button>
+
+    <!-- التنقل السفلي -->
+    <nav class="nav-bar fixed bottom-0 left-0 w-full flex justify-around py-2 pb-6 z-50 rounded-t-[20px] shadow-[0_-5px_20px_rgba(0,0,0,0.03)]">
+        <div onclick="app.switchTab('inventory')" class="nav-item active flex flex-col items-center w-1/3 cursor-pointer p-1" id="nav-inventory">
+            <i class="fa-solid fa-boxes-stacked text-lg mb-1"></i><span class="text-[9px] font-bold">المخزون</span>
+        </div>
+        <div onclick="app.switchTab('logs')" class="nav-item flex flex-col items-center w-1/3 cursor-pointer p-1" id="nav-logs">
+            <i class="fa-solid fa-clipboard-list text-lg mb-1"></i><span class="text-[9px] font-bold">السجل</span>
+        </div>
+        <div onclick="app.switchTab('settings')" class="nav-item flex flex-col items-center w-1/3 cursor-pointer p-1" id="nav-settings">
+            <i class="fa-solid fa-gear text-lg mb-1"></i><span class="text-[9px] font-bold">الإعدادات</span>
+        </div>
+    </nav>
+
+    <script>
+        const DB = {
+            dbName: 'InventoryProDB_V3',
+            version: 1,
+            db: null,
+
+            async init() {
+                return new Promise((resolve, reject) => {
+                    const request = indexedDB.open(this.dbName, this.version);
+                    request.onupgradeneeded = (e) => {
+                        const db = e.target.result;
+                        if (!db.objectStoreNames.contains('products')) db.createObjectStore('products', { keyPath: 'id' });
+                        if (!db.objectStoreNames.contains('logs')) db.createObjectStore('logs', { keyPath: 'id' });
+                        if (!db.objectStoreNames.contains('settings')) db.createObjectStore('settings', { keyPath: 'id' });
+                    };
+                    request.onsuccess = (e) => { this.db = e.target.result; resolve(this.db); };
+                    request.onerror = (e) => reject(e);
+                });
+            },
+            async getAll(store) {
+                if (!this.db) return [];
+                return new Promise(resolve => {
+                    const tx = this.db.transaction(store, 'readonly');
+                    tx.objectStore(store).getAll().onsuccess = (e) => resolve(e.target.result || []);
+                    tx.onerror = () => resolve([]);
+                });
+            },
+            async put(store, data) {
+                if (!this.db) return;
+                return new Promise(resolve => {
+                    const tx = this.db.transaction(store, 'readwrite');
+                    tx.objectStore(store).put(data);
+                    tx.oncomplete = () => resolve();
+                });
+            },
+            async delete(store, id) {
+                if (!this.db) return;
+                return new Promise(resolve => {
+                    const tx = this.db.transaction(store, 'readwrite');
+                    tx.objectStore(store).delete(id);
+                    tx.oncomplete = () => resolve();
+                });
+            },
+            async clear(store) {
+                if (!this.db) return;
+                return new Promise(resolve => {
+                    const tx = this.db.transaction(store, 'readwrite');
+                    tx.objectStore(store).clear();
+                    tx.oncomplete = () => resolve();
+                });
+            }
+        };
+
+        const app = {
+            data: { products: [], logs: [], settings: { id: 'config', appName: 'المخزون', threshold: 5, categories: [] } },
+            
+            async init() {
+                try {
+                    await DB.init();
+                    await this.loadData();
+                    this.renderUI();
+                    this.updateDate();
+                } catch (e) {
+                    console.error("Initialization error:", e);
+                    Swal.fire('خطأ', 'حدثت مشكلة في تحميل قاعدة البيانات', 'error');
+                }
+            },
+
+            updateDate() {
+                const options = { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' };
+                document.getElementById('current-date').innerText = new Date().toLocaleDateString('ar-EG', options);
+            },
+
+            async loadData() {
+                this.data.products = (await DB.getAll('products')) || [];
+                this.data.logs = (await DB.getAll('logs')) || [];
+                this.data.logs.sort((a,b) => b.id - a.id);
+                
+                const settings = await DB.getAll('settings');
+                if (settings && settings.length > 0) {
+                    this.data.settings = settings[0];
+                } else {
+                    this.data.settings = { id: 'config', appName: 'المخزون', threshold: 5, categories: [] };
+                    await DB.put('settings', this.data.settings);
+                }
+                
+                document.title = this.data.settings.appName || 'المخزون';
+                document.getElementById('app-title-display').innerText = this.data.settings.appName || 'المخزون';
+            },
+
+            // --- إدارة المنتجات ---
+
+            async openProductModal(id = null) {
+                const isEdit = id !== null;
+                const p = isEdit ? this.data.products.find(x => x.id === id) : { name: '', qty: '', desc: '', cat: '', images: [], isPinned: false };
+                const cats = (this.data.settings.categories || []).map(c => `<option value="${c}" ${c === p.cat ? 'selected' : ''}>${c}</option>`).join('');
+
+                const { value: form } = await Swal.fire({
+                    title: isEdit ? 'تعديل المنتج' : 'إضافة منتج',
+                    html: `
+                        <div class="text-right space-y-2 pt-2">
+                            <div class="relative border-2 border-dashed border-blue-200 bg-blue-50 rounded-xl p-3 text-center cursor-pointer hover:bg-blue-100 transition" onclick="document.getElementById('swal-file').click()">
+                                <i class="fa-solid fa-cloud-arrow-up text-xl text-blue-400"></i>
+                                <span class="block text-[10px] text-gray-500 font-bold">اضغط لرفع الصور</span>
+                                <input id="swal-file" type="file" multiple accept="image/*" class="hidden" onchange="app.previewImages(this)">
+                            </div>
+                            <div id="preview-area" class="flex gap-2 overflow-x-auto h-14 empty:hidden py-1"></div>
+                            
+                            <input id="swal-name" class="w-full p-2 border rounded-lg bg-gray-50 text-xs" placeholder="اسم المنتج" value="${p.name}">
+                            
+                            <div class="flex gap-2">
+                                <div class="relative w-1/2">
+                                    <input id="swal-qty" type="number" class="w-full p-2 border rounded-lg bg-gray-50 text-center font-bold num-en text-sm" placeholder="العدد" value="${p.qty}">
+                                </div>
+                                <select id="swal-cat" class="w-1/2 p-2 border rounded-lg bg-gray-50 text-xs outline-none">
+                                    <option value="">تصنيف عام</option>${cats}
+                                </select>
+                            </div>
+                            <textarea id="swal-desc" class="w-full p-2 border rounded-lg bg-gray-50 text-xs" placeholder="وصف..." rows="2">${p.desc || ''}</textarea>
+                        </div>
+                    `,
+                    showCancelButton: true,
+                    confirmButtonText: 'حفظ',
+                    confirmButtonColor: '#2563eb',
+                    cancelButtonText: 'إلغاء',
+                    didOpen: () => {
+                        if(isEdit && p.images) {
+                            const div = document.getElementById('preview-area');
+                            p.images.forEach(img => div.innerHTML += `<img src="${img}" class="h-full rounded border border-gray-200">`);
+                        }
+                    },
+                    preConfirm: async () => {
+                        const name = document.getElementById('swal-name').value;
+                        const qty = document.getElementById('swal-qty').value;
+                        if (!name || !qty) { Swal.showValidationMessage('البيانات ناقصة'); return false; }
+                        
+                        const files = document.getElementById('swal-file').files;
+                        let images = isEdit ? p.images : [];
+                        if (files.length > 0) {
+                            images = [];
+                            for (let file of files) images.push(await app.toBase64(file));
+                        }
+
+                        return {
+                            name, qty: parseInt(qty), 
+                            cat: document.getElementById('swal-cat').value,
+                            desc: document.getElementById('swal-desc').value,
+                            images
+                        };
+                    }
+                });
+
+                if (form) {
+                    const newProd = {
+                        id: isEdit ? p.id : Date.now(),
+                        dateCreated: isEdit ? p.dateCreated : Date.now(),
+                        isPinned: p.isPinned || false,
+                        ...form
+                    };
+                    await DB.put('products', newProd);
+                    await this.loadData();
+                    this.renderInventory();
+                    Swal.fire({icon: 'success', title: 'تم الحفظ', toast: true, position: 'top-end', showConfirmButton: false, timer: 1500});
+                }
+            },
+
+            async togglePin(id) {
+                const p = this.data.products.find(x => x.id === id);
+                if (p) {
+                    p.isPinned = !p.isPinned;
+                    await DB.put('products', p);
+                    this.loadData(); 
+                    this.renderInventory();
+                }
+            },
+
+            async deleteProduct(id) {
+                const r = await Swal.fire({
+                    title: 'حذف؟',
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonColor: '#ef4444',
+                    confirmButtonText: 'حذف',
+                    cancelButtonText: 'إلغاء'
+                });
+                if (r.isConfirmed) {
+                    await DB.delete('products', id);
+                    await this.loadData();
+                    this.renderInventory();
+                }
+            },
+
+            async updateStock(id, type) {
+                const p = this.data.products.find(x => x.id === id);
+                if (!p) return;
+                
+                if (type === 'out') {
+                    const { value: form } = await Swal.fire({
+                        title: 'تصدير (بيع)',
+                        html: `
+                            <div class="text-center">
+                                <h4 class="text-blue-600 font-bold mb-2 text-sm">${p.name}</h4>
+                                <div class="flex justify-center items-center gap-3 mb-3">
+                                    <button onclick="document.getElementById('stock-qty').stepDown()" class="w-8 h-8 bg-gray-100 rounded-full font-bold">-</button>
+                                    <input id="stock-qty" type="number" class="w-16 p-1 border rounded text-center font-bold text-xl num-en outline-none" value="1" min="1" max="${p.qty}">
+                                    <button onclick="document.getElementById('stock-qty').stepUp()" class="w-8 h-8 bg-gray-100 rounded-full font-bold">+</button>
+                                </div>
+                                <input id="stock-reason" type="text" class="w-full p-2 border rounded-lg bg-gray-50 text-xs" placeholder="سبب الخروج (اختياري)">
+                            </div>
+                        `,
+                        showCancelButton: true,
+                        confirmButtonText: 'تأكيد',
+                        confirmButtonColor: '#f59e0b',
+                        preConfirm: () => {
+                            const qty = parseInt(document.getElementById('stock-qty').value);
+                            const reason = document.getElementById('stock-reason').value;
+                            if (!qty || qty <= 0) return false;
+                            if (qty > p.qty) { Swal.showValidationMessage('الكمية غير متوفرة!'); return false; }
+                            return { qty, reason };
+                        }
+                    });
+
+                    if (form) {
+                        p.qty -= form.qty;
+                        await DB.put('products', p);
+                        await this.addLog({
+                            type: 'out', qty: form.qty, name: p.name, 
+                            reason: form.reason || 'مبيعات / خروج', image: p.images?.[0]
+                        });
+                        await this.loadData();
+                        this.renderUI();
+                    }
+                } else {
+                     const { value: qty } = await Swal.fire({
+                        title: 'توريد (زيادة)',
+                        input: 'number',
+                        inputValue: 1,
+                        inputAttributes: { min: 1 },
+                        confirmButtonText: 'إضافة',
+                        confirmButtonColor: '#10b981'
+                    });
+                    if (qty) {
+                        p.qty += parseInt(qty);
+                        await DB.put('products', p);
+                        await this.loadData();
+                        this.renderInventory();
+                    }
+                }
+            },
+
+            // --- التصدير الجماعي (المحدث) ---
+
+            async openBulkExportModal() {
+                if(this.data.products.length === 0) return Swal.fire('تنبيه', 'المخزن فارغ', 'warning');
+
+                // 1. بناء قائمة المنتجات
+                const productsHtml = this.data.products.filter(p => p.qty > 0).map(p => {
+                    const imgHtml = (p.images && p.images.length > 0) 
+                        ? `<img src="${p.images[0]}" class="w-8 h-8 rounded object-cover border border-gray-200 flex-shrink-0">` 
+                        : `<div class="w-8 h-8 rounded bg-gray-100 flex items-center justify-center text-gray-400 text-xs border border-gray-200 flex-shrink-0"><i class="fa-solid fa-image"></i></div>`;
+
+                    return `
+                    <div class="bulk-item flex items-center justify-between p-2 border-b hover:bg-gray-50 transition-colors" data-search="${p.name.toLowerCase()}">
+                        <label class="flex items-center gap-3 cursor-pointer w-full select-none overflow-hidden">
+                            <input type="checkbox" class="bulk-select-checkbox w-4 h-4 accent-amber-500 cursor-pointer flex-shrink-0" value="${p.id}" data-max="${p.qty}" data-name="${p.name}">
+                            ${imgHtml}
+                            <span class="text-sm text-gray-700 font-medium truncate">${p.name}</span>
+                        </label>
+                        <!-- هنا تم التعديل: whitespace-nowrap و flex-shrink-0 لمنع نزول الرقم لسطرين -->
+                        <span class="text-xs bg-gray-100 px-2 py-0.5 rounded num-en text-gray-500 font-bold whitespace-nowrap flex-shrink-0">${p.qty}</span>
+                    </div>
+                    `;
+                }).join('');
+
+                const { value: selectedIds } = await Swal.fire({
+                    title: 'اختر المنتجات للتصدير',
+                    html: `
+                        <div class="text-right">
+                            <div class="relative mb-2">
+                                <input type="text" id="swal-bulk-search" class="w-full bg-gray-50 p-2 pl-8 rounded-lg border border-gray-200 outline-none focus:border-blue-400 text-xs" placeholder="ابحث عن منتج...">
+                                <i class="fa-solid fa-search absolute top-2.5 left-3 text-gray-400 text-xs"></i>
+                            </div>
+                            <div class="max-h-60 overflow-y-auto border rounded-lg" id="swal-bulk-list">
+                                ${productsHtml}
+                            </div>
+                        </div>
+                    `,
+                    showCancelButton: true,
+                    confirmButtonText: 'التالي',
+                    confirmButtonColor: '#2563eb',
+                    didOpen: () => {
+                        const searchInput = document.getElementById('swal-bulk-search');
+                        const items = document.querySelectorAll('.bulk-item');
+                        
+                        searchInput.onkeyup = (e) => {
+                            const val = e.target.value.toLowerCase();
+                            items.forEach(item => {
+                                const name = item.getAttribute('data-search');
+                                item.style.display = name.includes(val) ? 'flex' : 'none';
+                            });
+                        };
+                    },
+                    preConfirm: () => {
+                        const checkboxes = document.querySelectorAll('.bulk-select-checkbox:checked');
+                        if (checkboxes.length === 0) { Swal.showValidationMessage('اختر منتجاً واحداً على الأقل'); return false; }
+                        return Array.from(checkboxes).map(cb => ({ id: parseInt(cb.value), max: parseInt(cb.getAttribute('data-max')), name: cb.getAttribute('data-name') }));
+                    }
+                });
+
+                if (!selectedIds) return;
+
+                // 2. خطوة تحديد الكميات
+                const qtyInputsHtml = selectedIds.map(item => `
+                    <div class="flex items-center justify-between mb-2 p-2 bg-gray-50 rounded-lg border">
+                        <span class="text-xs font-bold w-1/3 text-right truncate">${item.name}</span>
+                        <div class="flex items-center gap-2">
+                            <span class="text-[10px] text-gray-400">الحد: ${item.max}</span>
+                            <input type="number" id="bulk-qty-${item.id}" class="w-16 p-1 border rounded text-center font-bold num-en text-sm outline-none focus:border-amber-500" value="1" min="1" max="${item.max}">
+                        </div>
+                    </div>
+                `).join('');
+
+                const { value: bulkData } = await Swal.fire({
+                    title: 'تحديد الكميات',
+                    html: `
+                        <div class="text-right">
+                            <div class="max-h-48 overflow-y-auto mb-3">${qtyInputsHtml}</div>
+                            <label class="text-xs font-bold block mb-1">سبب التصدير (موحد)</label>
+                            <input id="bulk-reason" type="text" class="w-full p-2 border rounded-lg text-sm" placeholder="مثال: طلبية رقم 105">
+                        </div>
+                    `,
+                    confirmButtonText: 'إتمام العملية',
+                    confirmButtonColor: '#f59e0b',
+                    showCancelButton: true,
+                    preConfirm: () => {
+                        const reason = document.getElementById('bulk-reason').value || 'تصدير جماعي';
+                        const items = [];
+                        for (let item of selectedIds) {
+                            const qtyVal = parseInt(document.getElementById(`bulk-qty-${item.id}`).value);
+                            if (!qtyVal || qtyVal <= 0) { Swal.showValidationMessage(`كمية ${item.name} غير صحيحة`); return false; }
+                            if (qtyVal > item.max) { Swal.showValidationMessage(`الكمية المطلوبة لـ ${item.name} تتجاوز المخزون`); return false; }
+                            items.push({ id: item.id, qty: qtyVal, name: item.name });
+                        }
+                        return { reason, items };
+                    }
+                });
+
+                if (bulkData) {
+                    for (let item of bulkData.items) {
+                        const p = this.data.products.find(x => x.id === item.id);
+                        if (p) {
+                            p.qty -= item.qty;
+                            await DB.put('products', p);
+                        }
+                    }
+                    
+                    await this.addLog({
+                        type: 'bulk_out',
+                        qty: bulkData.items.reduce((a, b) => a + b.qty, 0),
+                        name: 'عملية جماعية',
+                        reason: bulkData.reason,
+                        items: bulkData.items
+                    });
+
+                    await this.loadData();
+                    this.renderUI();
+                    Swal.fire('تم!', 'تم تصدير المجموعة بنجاح', 'success');
+                }
+            },
+
+            // --- السجل ---
+
+            async addLog(data) {
+                const log = {
+                    id: Date.now(),
+                    date: Date.now(),
+                    ...data
+                };
+                await DB.put('logs', log);
+            },
+
+            async deleteLog(id) {
+                const r = await Swal.fire({
+                    title: 'حذف السجل؟',
+                    text: "لن يعود المخزون، فقط سيحذف السطر من هنا.",
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonText: 'حذف',
+                    confirmButtonColor: '#d33'
+                });
+                if (r.isConfirmed) {
+                    await DB.delete('logs', id);
+                    await this.loadData();
+                    this.renderLogs();
+                }
+            },
+
+            async clearAllLogs() {
+                const r = await Swal.fire({title: 'تأكيد المسح؟', icon: 'warning', showCancelButton: true, confirmButtonColor: '#d33', confirmButtonText: 'نعم'});
+                if (r.isConfirmed) {
+                    await DB.clear('logs');
+                    await this.loadData();
+                    this.renderLogs();
+                }
+            },
+
+            showFullReason(reason) {
+                Swal.fire({
+                    title: 'تفاصيل السبب',
+                    text: reason,
+                    confirmButtonText: 'حسناً'
+                });
+            },
+
+            toggleLogDetails(id) {
+                const details = document.getElementById(`log-details-${id}`);
+                const icon = document.getElementById(`log-icon-${id}`);
+                if (details.style.maxHeight && details.style.maxHeight !== "0px") {
+                    details.style.maxHeight = "0px";
+                    details.classList.remove('open');
+                    icon.classList.remove('rotated');
+                } else {
+                    details.style.maxHeight = details.scrollHeight + "px";
+                    details.classList.add('open');
+                    icon.classList.add('rotated');
+                }
+            },
+
+            // --- الإعدادات والعرض ---
+
+            async addCategory() {
+                const val = document.getElementById('new-cat').value.trim();
+                if (val) {
+                    if(!this.data.settings.categories) this.data.settings.categories = [];
+                    this.data.settings.categories.push(val);
+                    await DB.put('settings', this.data.settings);
+                    document.getElementById('new-cat').value = '';
+                    this.renderSettings();
+                }
+            },
+
+            async saveSettings() {
+                this.data.settings.threshold = parseInt(document.getElementById('setting-threshold').value);
+                this.data.settings.appName = document.getElementById('setting-app-name').value || 'المخزون';
+                await DB.put('settings', this.data.settings);
+                document.title = this.data.settings.appName;
+                document.getElementById('app-title-display').innerText = this.data.settings.appName;
+                this.renderInventory();
+            },
+
+            exportExcel() {
+                if(this.data.products.length === 0) return Swal.fire('تنبيه', 'لا توجد بيانات', 'info');
+                const data = this.data.products.map(p => ({ "الاسم": p.name, "العدد": p.qty, "التصنيف": p.cat || '', "الوصف": p.desc || '' }));
+                const ws = XLSX.utils.json_to_sheet(data);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "المخزون");
+                XLSX.writeFile(wb, `Inventory.xlsx`);
+            },
+
+            importExcel(input) {
+                const file = input.files[0];
+                if(!file) return;
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    try {
+                        const data = new Uint8Array(e.target.result);
+                        const workbook = XLSX.read(data, {type: 'array'});
+                        const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1});
+                        let startRow = (typeof jsonData[0][1] === 'string') ? 1 : 0;
+                        let count = 0;
+                        for(let i=startRow; i<jsonData.length; i++) {
+                            const row = jsonData[i];
+                            if(row[0]) {
+                                await DB.put('products', {
+                                    id: Date.now() + i, dateCreated: Date.now(), name: row[0],
+                                    qty: parseInt(row[1]) || 0, desc: row[2] || '', cat: '', images: [], isPinned: false
+                                });
+                                count++;
+                            }
+                        }
+                        await this.loadData();
+                        this.renderInventory();
+                        Swal.fire('نجاح', `تم استيراد ${count} منتج`, 'success');
+                    } catch (err) { Swal.fire('خطأ', 'صيغة الملف غير مدعومة', 'error'); }
+                    input.value = '';
+                };
+                reader.readAsArrayBuffer(file);
+            },
+
+            // اصلاح مشكلة الشاشة البيضاء (Reset Soft)
+            async resetSystem() {
+                const r = await Swal.fire({ 
+                    title: 'هل أنت متأكد؟', 
+                    text: "سيتم حذف كل شيء!", 
+                    icon: 'error', 
+                    showCancelButton: true, 
+                    confirmButtonColor: '#d33', 
+                    confirmButtonText: 'نعم، فرمتة' 
+                });
+                
+                if (r.isConfirmed) {
+                    await DB.clear('products'); 
+                    await DB.clear('logs'); 
+                    await DB.clear('settings');
+                    
+                    this.data = { 
+                        products: [], 
+                        logs: [], 
+                        settings: { id: 'config', appName: 'المخزون', threshold: 5, categories: [] } 
+                    };
+                    await DB.put('settings', this.data.settings);
+
+                    document.title = this.data.settings.appName;
+                    document.getElementById('app-title-display').innerText = this.data.settings.appName;
+                    this.switchTab('inventory');
+                    this.renderUI();
+
+                    Swal.fire({icon: 'success', title: 'تمت الفرمتة', text: 'عاد النظام لوضع المصنع', timer: 1500, showConfirmButton: false});
+                }
+            },
+
+            // --- Rendering ---
+
+            renderUI() {
+                this.renderInventory();
+                this.renderLogs();
+                this.renderSettings();
+            },
+
+            renderInventory() {
+                const list = document.getElementById('inventory-list');
+                if(!list) return;
+                const search = document.getElementById('search-input').value.toLowerCase();
+                const sortMode = document.getElementById('sort-select').value;
+                
+                let items = (this.data.products || []).filter(p => p.name.toLowerCase().includes(search));
+
+                if (sortMode === 'alert') items = items.filter(p => p.qty <= (this.data.settings.threshold || 5));
+
+                items.sort((a, b) => {
+                    if (sortMode === 'pinned' || sortMode === 'recent') if (a.isPinned !== b.isPinned) return b.isPinned - a.isPinned;
+                    if (sortMode === 'recent' || sortMode === 'pinned') return b.id - a.id;
+                    if (sortMode === 'qty_asc') return a.qty - b.qty;
+                    if (sortMode === 'qty_desc') return b.qty - a.qty;
+                    return 0;
+                });
+
+                if(items.length === 0) {
+                    document.getElementById('empty-state').classList.remove('hidden');
+                    list.innerHTML = '';
+                } else {
+                    document.getElementById('empty-state').classList.add('hidden');
+                    list.innerHTML = items.map(p => {
+                        const isLow = p.qty <= (this.data.settings.threshold || 5);
+                        const coverImg = (p.images && p.images.length > 0) ? `background-image: url('${p.images[0]}');` : `background-color: #f8fafc;`;
+                        const hasImg = p.images && p.images.length > 0;
+
+                        return `
+                        <div class="glass-card relative overflow-hidden flex flex-col h-full group ${isLow ? 'ring-2 ring-red-300' : ''}">
+                            ${isLow ? '<div class="absolute top-1 left-1 bg-red-500 text-white text-[8px] px-1.5 py-0.5 rounded-md shadow z-10 font-bold">ناقص</div>' : ''}
+                            <button onclick="app.togglePin(${p.id})" class="absolute top-1 right-1 z-10 w-6 h-6 bg-white/80 backdrop-blur rounded-full flex items-center justify-center shadow-sm">
+                                <i class="fa-solid fa-thumbtack text-[10px] ${p.isPinned ? 'pin-active' : 'pin-inactive'}"></i>
+                            </button>
+                            <div class="h-24 w-full bg-cover bg-center relative" style="${coverImg}">
+                                ${!hasImg ? '<div class="flex items-center justify-center h-full text-gray-300"><i class="fa-solid fa-image text-2xl"></i></div>' : ''}
+                                <div class="absolute bottom-0 w-full h-2/3 bg-gradient-to-t from-black/70 to-transparent"></div>
+                                <div class="absolute bottom-1 right-2 text-white font-bold text-xs shadow-black drop-shadow-md truncate w-11/12">${p.name}</div>
+                            </div>
+                            <div class="p-2 flex-1 flex flex-col">
+                                <div class="flex justify-between items-center mb-1">
+                                    <span class="text-[8px] bg-gray-100 text-gray-500 px-1.5 rounded">${p.cat || 'عام'}</span>
+                                    <span class="num-en font-extrabold text-base ${isLow ? 'text-red-600' : 'text-gray-800'}">${p.qty}</span>
+                                </div>
+                                <div class="grid grid-cols-2 gap-1.5 mt-auto pt-1">
+                                    <button onclick="app.updateStock(${p.id}, 'in')" class="bg-emerald-50 text-emerald-600 py-1 rounded text-[10px] font-bold"><i class="fa-solid fa-plus"></i></button>
+                                    <button onclick="app.updateStock(${p.id}, 'out')" class="bg-amber-50 text-amber-600 py-1 rounded text-[10px] font-bold"><i class="fa-solid fa-minus"></i></button>
+                                </div>
+                                <div class="flex justify-between mt-1.5 pt-1 border-t border-gray-50">
+                                    <button onclick="app.openProductModal(${p.id})" class="text-gray-400 hover:text-blue-500 text-[10px]"><i class="fa-solid fa-pen"></i></button>
+                                    <button onclick="app.deleteProduct(${p.id})" class="text-gray-400 hover:text-red-500 text-[10px]"><i class="fa-solid fa-trash"></i></button>
+                                </div>
+                            </div>
+                        </div>`;
+                    }).join('');
+                }
+                document.getElementById('total-items-badge').innerText = (this.data.products || []).length;
+            },
+
+            renderLogs() {
+                const list = document.getElementById('logs-list');
+                if(!list) return;
+                const search = document.getElementById('log-search').value.toLowerCase();
+                
+                const filtered = (this.data.logs || []).filter(l => (l.type === 'out' || l.type === 'bulk_out') && 
+                          (l.name.toLowerCase().includes(search) || l.reason.toLowerCase().includes(search)));
+
+                list.innerHTML = filtered.length ? filtered.map(l => {
+                    const dateObj = new Date(l.date);
+                    const dateStr = dateObj.toLocaleDateString('en-GB');
+                    const timeStr = dateObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                    
+                    const isBulk = l.type === 'bulk_out';
+                    const expandBtn = isBulk 
+                        ? `<button onclick="app.toggleLogDetails(${l.id})" class="w-7 h-7 flex items-center justify-center text-blue-400 hover:bg-blue-50 rounded-full transition ml-1"><i id="log-icon-${l.id}" class="fa-solid fa-chevron-down rotate-icon text-xs"></i></button>` 
+                        : '';
+                    
+                    let detailsContent = '';
+                    if (isBulk && l.items) {
+                        const itemsList = l.items.map(i => `
+                            <div class="flex justify-between items-center py-1 border-b border-gray-100 last:border-0">
+                                <span class="text-xs text-gray-600"><i class="fa-solid fa-check text-[8px] text-green-400 ml-1"></i> ${i.name}</span>
+                                <span class="text-xs font-bold text-red-500 num-en">-${i.qty}</span>
+                            </div>
+                        `).join('');
+                        detailsContent = `<div id="log-details-${l.id}" class="log-details px-4"><div class="py-2 space-y-1">${itemsList}</div></div>`;
+                    }
+
+                    return `
+                    <div class="glass-card overflow-hidden border-r-4 ${isBulk ? 'border-blue-400' : 'border-amber-400'}">
+                        <div class="p-3 flex gap-2 items-center">
+                            <div class="flex-1">
+                                <div class="flex justify-between items-start">
+                                    <h4 class="font-bold text-gray-800 text-xs flex items-center gap-1">
+                                        ${isBulk ? '<i class="fa-solid fa-layer-group text-blue-500"></i> ' : ''} ${l.name}
+                                    </h4>
+                                    <span class="bg-red-50 text-red-600 px-2 py-0.5 rounded text-[10px] font-bold num-en">-${l.qty}</span>
+                                </div>
+                                <div class="flex items-center gap-2 mt-1">
+                                    <p class="text-[10px] text-gray-500 truncate max-w-[120px]">${l.reason}</p>
+                                    <button onclick="app.showFullReason('${l.reason.replace(/'/g, "\\'")}')" class="text-gray-400 hover:text-blue-500 text-[10px]"><i class="fa-solid fa-eye"></i></button>
+                                </div>
+                                <p class="text-[9px] text-gray-300 mt-1 num-en">${dateStr} • ${timeStr}</p>
+                            </div>
+                            <div class="flex flex-col gap-1">
+                                <button onclick="app.deleteLog(${l.id})" class="w-7 h-7 flex items-center justify-center text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-full transition"><i class="fa-solid fa-xmark text-xs"></i></button>
+                                ${expandBtn}
+                            </div>
+                        </div>
+                        ${detailsContent}
+                    </div>`;
+                }).join('') : '<div class="text-center py-8"><p class="text-gray-400 text-xs">لا توجد سجلات</p></div>';
+            },
+
+            renderSettings() {
+                const thresholdInput = document.getElementById('setting-threshold');
+                if(thresholdInput) thresholdInput.value = this.data.settings.threshold || 5;
+                
+                const nameInput = document.getElementById('setting-app-name');
+                if(nameInput) nameInput.value = this.data.settings.appName || 'المخزون';
+                
+                const div = document.getElementById('categories-list');
+                if(div) {
+                    div.innerHTML = (this.data.settings.categories || []).map(c => `
+                        <span class="bg-white border border-gray-200 text-gray-600 px-2 py-0.5 rounded-md text-[10px] flex items-center gap-1">
+                            ${c} <i onclick="app.removeCategory('${c}')" class="fa-solid fa-xmark text-gray-300 cursor-pointer hover:text-red-500"></i>
+                        </span>
+                    `).join('');
+                }
+            },
+
+            removeCategory(c) {
+                this.data.settings.categories = this.data.settings.categories.filter(x => x !== c);
+                DB.put('settings', this.data.settings);
+                this.renderSettings();
+            },
+
+            switchTab(id) {
+                document.querySelectorAll('.view-section').forEach(e => e.classList.add('hidden'));
+                const target = document.getElementById(`view-${id}`);
+                if(target) target.classList.remove('hidden');
+                
+                document.querySelectorAll('.nav-item').forEach(e => e.classList.remove('active'));
+                const nav = document.getElementById(`nav-${id}`);
+                if(nav) nav.classList.add('active');
+                
+                const fab = document.getElementById('fab-add');
+                if(fab) fab.style.display = id === 'inventory' ? 'flex' : 'none';
+                
+                window.scrollTo(0,0);
+                if(id === 'logs') this.renderLogs();
+            },
+            
+            previewImages(input) {
+                const div = document.getElementById('preview-area');
+                div.innerHTML = '';
+                if(input.files) Array.from(input.files).forEach(f => {
+                    const reader = new FileReader();
+                    reader.onload = e => div.innerHTML += `<img src="${e.target.result}" class="h-full rounded border border-gray-200">`;
+                    reader.readAsDataURL(f);
+                });
+            },
+            
+            toBase64(file) {
+                return new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result);
+                    reader.readAsDataURL(file);
+                });
+            }
+        };
+
+        window.onload = () => app.init();
+    </script>
+</body>
+</html>
