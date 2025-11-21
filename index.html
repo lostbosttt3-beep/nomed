@@ -703,14 +703,41 @@
                 this.renderInventory();
             },
 
+            // === التعديل هنا: دالة تصدير محسنة للتطبيقات ===
             exportExcel() {
                 if(this.data.products.length === 0) return Swal.fire('تنبيه', 'لا توجد بيانات', 'info');
+                
+                // 1. تجهيز البيانات
                 const data = this.data.products.map(p => ({ "الاسم": p.name, "العدد": p.qty, "التصنيف": p.cat || '', "الوصف": p.desc || '' }));
                 const ws = XLSX.utils.json_to_sheet(data);
                 const wb = XLSX.utils.book_new();
                 XLSX.utils.book_append_sheet(wb, ws, "المخزون");
-                XLSX.writeFile(wb, `Inventory.xlsx`);
+
+                try {
+                    // 2. إنشاء ملف Excel بصيغة Base64 مباشرة (حل لمشكلة الملف المعطوب في Webview)
+                    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
+                    
+                    // 3. إنشاء رابط تنزيل مباشر
+                    const uri = 'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,' + wbout;
+                    
+                    // 4. إنشاء عنصر رابط وضغطه برمجياً
+                    const link = document.createElement("a");
+                    link.href = uri;
+                    
+                    // وضع اسم وتاريخ للملف (قد يتم تجاهله في بعض الأنظمة لكنه مفيد)
+                    const dateStr = new Date().toISOString().slice(0,10);
+                    link.download = `Inventory_${dateStr}.xlsx`;
+                    
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+
+                } catch(e) {
+                    console.error(e);
+                    Swal.fire('خطأ', 'فشل إنشاء الملف', 'error');
+                }
             },
+            // ===============================================
 
             importExcel(input) {
                 const file = input.files[0];
