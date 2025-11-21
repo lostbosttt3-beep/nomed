@@ -62,8 +62,11 @@
         }
         .nav-item { color: #94a3b8; transition: 0.3s; }
 
-        .pin-active { color: #f59e0b; transform: rotate(45deg); }
-        .pin-inactive { color: #cbd5e1; }
+        /* تنسيق أيقونة التثبيت الجديدة */
+        .pin-icon { transition: all 0.3s; text-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+        .pin-icon.active { color: #f59e0b; transform: rotate(0deg); opacity: 1; }
+        .pin-icon.inactive { color: #3b82f6; opacity: 0.6; transform: rotate(45deg); }
+        .pin-icon.inactive:hover { opacity: 1; }
 
         /* تنسيق تفاصيل السجل */
         .log-details {
@@ -87,7 +90,8 @@
         <div class="flex justify-between items-center text-white">
             <div class="flex flex-col justify-center">
                 <h1 class="text-lg font-bold tracking-wide leading-tight" id="app-title-display">المخزون</h1>
-                <p class="text-[10px] text-blue-100 opacity-80" id="current-date"></p>
+                <!-- التاريخ بالأرقام اللاتينية -->
+                <p class="text-[10px] text-blue-100 opacity-80 num-en" id="current-date" style="direction: rtl; unicode-bidi: embed;"></p>
             </div>
             <div class="bg-white/20 backdrop-blur-md px-3 py-1 rounded-lg border border-white/30 flex items-center gap-2">
                 <span class="text-[10px] opacity-90">المجموع:</span>
@@ -100,18 +104,28 @@
         
         <!-- 1. واجهة المخزون -->
         <section id="view-inventory" class="view-section">
-            <div class="glass-card p-2 mb-3 flex gap-2 sticky top-[70px] z-30 shadow-sm items-center">
-                <div class="relative flex-1">
-                    <input type="text" id="search-input" onkeyup="app.renderInventory()" placeholder="بحث سريع..." class="w-full bg-gray-50 p-2 pr-8 rounded-lg border border-gray-200 outline-none focus:border-blue-400 text-xs">
+            <!-- شريط البحث والفلترة -->
+            <div class="glass-card p-2 mb-3 flex flex-col gap-2 sticky top-[70px] z-30 shadow-sm">
+                <!-- البحث -->
+                <div class="relative w-full">
+                    <input type="text" id="search-input" onkeyup="app.renderInventory()" placeholder="بحث (اسم، وصف، عدد، صنف)..." class="w-full bg-gray-50 p-2 pr-8 rounded-lg border border-gray-200 outline-none focus:border-blue-400 text-xs">
                     <i class="fa-solid fa-search absolute top-2.5 right-2.5 text-gray-400 text-xs"></i>
                 </div>
-                <select id="sort-select" onchange="app.renderInventory()" class="bg-gray-50 border border-gray-200 text-gray-600 text-[10px] rounded-lg px-1 h-9 outline-none w-20">
-                    <option value="pinned">المثبت</option>
-                    <option value="recent">الأحدث</option>
-                    <option value="qty_asc">الأقل عدداً</option>
-                    <option value="qty_desc">الأكثر عدداً</option>
-                    <option value="alert">النواقص</option>
-                </select>
+                <!-- الفلاتر -->
+                <div class="flex gap-2">
+                    <!-- فلتر الأصناف (بديل فلتر المثبت) -->
+                    <select id="cat-filter" onchange="app.renderInventory()" class="bg-gray-50 border border-gray-200 text-gray-600 text-[10px] rounded-lg px-1 h-9 outline-none flex-1">
+                        <option value="all">كل الأصناف</option>
+                    </select>
+
+                    <!-- الترتيب -->
+                    <select id="sort-select" onchange="app.renderInventory()" class="bg-gray-50 border border-gray-200 text-gray-600 text-[10px] rounded-lg px-1 h-9 outline-none w-24">
+                        <option value="recent">الأحدث</option>
+                        <option value="qty_asc">الأقل عدداً</option>
+                        <option value="qty_desc">الأكثر عدداً</option>
+                        <option value="alert">النواقص</option>
+                    </select>
+                </div>
             </div>
 
             <div id="inventory-list" class="grid grid-cols-2 md:grid-cols-3 gap-2 pb-20"></div>
@@ -304,8 +318,14 @@
             },
 
             updateDate() {
+                // استخدام u-nu-latn لإجبار الأرقام اللاتينية مع النص العربي
                 const options = { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' };
-                document.getElementById('current-date').innerText = new Date().toLocaleDateString('ar-EG', options);
+                try {
+                    document.getElementById('current-date').innerText = new Date().toLocaleDateString('ar-EG-u-nu-latn', options);
+                } catch (e) {
+                    // Fallback if locale extension not supported
+                    document.getElementById('current-date').innerText = new Date().toLocaleDateString('en-GB', options);
+                }
             },
 
             async loadData() {
@@ -485,12 +505,11 @@
                 }
             },
 
-            // --- التصدير الجماعي (المحدث) ---
+            // --- التصدير الجماعي ---
 
             async openBulkExportModal() {
                 if(this.data.products.length === 0) return Swal.fire('تنبيه', 'المخزن فارغ', 'warning');
 
-                // 1. بناء قائمة المنتجات
                 const productsHtml = this.data.products.filter(p => p.qty > 0).map(p => {
                     const imgHtml = (p.images && p.images.length > 0) 
                         ? `<img src="${p.images[0]}" class="w-8 h-8 rounded object-cover border border-gray-200 flex-shrink-0">` 
@@ -503,7 +522,6 @@
                             ${imgHtml}
                             <span class="text-sm text-gray-700 font-medium truncate">${p.name}</span>
                         </label>
-                        <!-- هنا تم التعديل: whitespace-nowrap و flex-shrink-0 لمنع نزول الرقم لسطرين -->
                         <span class="text-xs bg-gray-100 px-2 py-0.5 rounded num-en text-gray-500 font-bold whitespace-nowrap flex-shrink-0">${p.qty}</span>
                     </div>
                     `;
@@ -546,7 +564,6 @@
 
                 if (!selectedIds) return;
 
-                // 2. خطوة تحديد الكميات
                 const qtyInputsHtml = selectedIds.map(item => `
                     <div class="flex items-center justify-between mb-2 p-2 bg-gray-50 rounded-lg border">
                         <span class="text-xs font-bold w-1/3 text-right truncate">${item.name}</span>
@@ -673,6 +690,7 @@
                     await DB.put('settings', this.data.settings);
                     document.getElementById('new-cat').value = '';
                     this.renderSettings();
+                    this.renderInventory(); // لتحديث الفلتر
                 }
             },
 
@@ -724,35 +742,50 @@
                 reader.readAsArrayBuffer(file);
             },
 
-            // اصلاح مشكلة الشاشة البيضاء (Reset Soft)
+            // --- Reset Soft (تصفير مع تحذير مزدوج) ---
             async resetSystem() {
-                const r = await Swal.fire({ 
+                // التحذير الأول
+                const step1 = await Swal.fire({ 
                     title: 'هل أنت متأكد؟', 
-                    text: "سيتم حذف كل شيء!", 
-                    icon: 'error', 
+                    text: "سيتم حذف جميع البيانات!", 
+                    icon: 'warning', 
                     showCancelButton: true, 
-                    confirmButtonColor: '#d33', 
-                    confirmButtonText: 'نعم، فرمتة' 
+                    confirmButtonColor: '#f59e0b', 
+                    confirmButtonText: 'نعم، متابعة',
+                    cancelButtonText: 'إلغاء'
                 });
                 
-                if (r.isConfirmed) {
-                    await DB.clear('products'); 
-                    await DB.clear('logs'); 
-                    await DB.clear('settings');
-                    
-                    this.data = { 
-                        products: [], 
-                        logs: [], 
-                        settings: { id: 'config', appName: 'المخزون', threshold: 5, categories: [] } 
-                    };
-                    await DB.put('settings', this.data.settings);
+                if (step1.isConfirmed) {
+                    // التحذير الثاني (تأكيد نهائي)
+                    const step2 = await Swal.fire({
+                        title: 'تأكيد نهائي!',
+                        text: "لن يمكنك استرجاع البيانات. هل أنت موافق؟",
+                        icon: 'error',
+                        showCancelButton: true,
+                        confirmButtonColor: '#d33',
+                        confirmButtonText: 'نعم، احذف كل شيء',
+                        cancelButtonText: 'تراجع'
+                    });
 
-                    document.title = this.data.settings.appName;
-                    document.getElementById('app-title-display').innerText = this.data.settings.appName;
-                    this.switchTab('inventory');
-                    this.renderUI();
+                    if (step2.isConfirmed) {
+                        await DB.clear('products'); 
+                        await DB.clear('logs'); 
+                        await DB.clear('settings');
+                        
+                        this.data = { 
+                            products: [], 
+                            logs: [], 
+                            settings: { id: 'config', appName: 'المخزون', threshold: 5, categories: [] } 
+                        };
+                        await DB.put('settings', this.data.settings);
 
-                    Swal.fire({icon: 'success', title: 'تمت الفرمتة', text: 'عاد النظام لوضع المصنع', timer: 1500, showConfirmButton: false});
+                        document.title = this.data.settings.appName;
+                        document.getElementById('app-title-display').innerText = this.data.settings.appName;
+                        this.switchTab('inventory');
+                        this.renderUI();
+
+                        Swal.fire({icon: 'success', title: 'تم التصفير', text: 'عاد النظام لوضع المصنع', timer: 1500, showConfirmButton: false});
+                    }
                 }
             },
 
@@ -767,16 +800,48 @@
             renderInventory() {
                 const list = document.getElementById('inventory-list');
                 if(!list) return;
+                
                 const search = document.getElementById('search-input').value.toLowerCase();
                 const sortMode = document.getElementById('sort-select').value;
+                const catFilter = document.getElementById('cat-filter').value;
                 
-                let items = (this.data.products || []).filter(p => p.name.toLowerCase().includes(search));
+                // --- التعديل هنا (إصلاح مشكلة تحديث الفئات) ---
+                const catSelect = document.getElementById('cat-filter');
+                const currentSelection = catSelect.value; // حفظ الاختيار الحالي
+                
+                // إعادة تعيين القائمة مع الخيار الافتراضي
+                catSelect.innerHTML = '<option value="all">كل الأصناف</option>';
+                
+                // إضافة جميع الأصناف من الإعدادات
+                (this.data.settings.categories || []).forEach(c => {
+                     catSelect.innerHTML += `<option value="${c}">${c}</option>`;
+                });
+
+                // محاولة استعادة الاختيار السابق إذا كان موجوداً، وإلا العودة للكل
+                catSelect.value = currentSelection;
+                if(catSelect.value !== currentSelection) catSelect.value = 'all';
+                // --------------------------------------------------
+
+                // منطق البحث والفلترة
+                let items = (this.data.products || []).filter(p => {
+                    const matchSearch = p.name.toLowerCase().includes(search) || 
+                                        (p.desc || '').toLowerCase().includes(search) || 
+                                        p.qty.toString().includes(search) || 
+                                        (p.cat || '').toLowerCase().includes(search);
+                    
+                    const matchCat = catFilter === 'all' || p.cat === catFilter;
+                    
+                    return matchSearch && matchCat;
+                });
 
                 if (sortMode === 'alert') items = items.filter(p => p.qty <= (this.data.settings.threshold || 5));
 
+                // الترتيب (دائماً المثبت أولاً)
                 items.sort((a, b) => {
-                    if (sortMode === 'pinned' || sortMode === 'recent') if (a.isPinned !== b.isPinned) return b.isPinned - a.isPinned;
-                    if (sortMode === 'recent' || sortMode === 'pinned') return b.id - a.id;
+                    // المثبت يظهر دائماً في الأعلى بغض النظر عن الترتيب المختار
+                    if (a.isPinned !== b.isPinned) return b.isPinned - a.isPinned;
+
+                    if (sortMode === 'recent') return b.id - a.id;
                     if (sortMode === 'qty_asc') return a.qty - b.qty;
                     if (sortMode === 'qty_desc') return b.qty - a.qty;
                     return 0;
@@ -791,13 +856,18 @@
                         const isLow = p.qty <= (this.data.settings.threshold || 5);
                         const coverImg = (p.images && p.images.length > 0) ? `background-image: url('${p.images[0]}');` : `background-color: #f8fafc;`;
                         const hasImg = p.images && p.images.length > 0;
+                        // تقصير الوصف
+                        const shortDesc = p.desc && p.desc.length > 0 ? (p.desc.length > 20 ? p.desc.substring(0, 20) + '...' : p.desc) : '';
 
                         return `
                         <div class="glass-card relative overflow-hidden flex flex-col h-full group ${isLow ? 'ring-2 ring-red-300' : ''}">
                             ${isLow ? '<div class="absolute top-1 left-1 bg-red-500 text-white text-[8px] px-1.5 py-0.5 rounded-md shadow z-10 font-bold">ناقص</div>' : ''}
-                            <button onclick="app.togglePin(${p.id})" class="absolute top-1 right-1 z-10 w-6 h-6 bg-white/80 backdrop-blur rounded-full flex items-center justify-center shadow-sm">
-                                <i class="fa-solid fa-thumbtack text-[10px] ${p.isPinned ? 'pin-active' : 'pin-inactive'}"></i>
+                            
+                            <!-- أيقونة التثبيت الجديدة بدون خلفية -->
+                            <button onclick="app.togglePin(${p.id})" class="absolute top-1 right-1 z-10 w-8 h-8 flex items-center justify-center transition-transform active:scale-90">
+                                <i class="fa-solid fa-thumbtack text-lg drop-shadow-sm pin-icon ${p.isPinned ? 'active' : 'inactive'}"></i>
                             </button>
+                            
                             <div class="h-24 w-full bg-cover bg-center relative" style="${coverImg}">
                                 ${!hasImg ? '<div class="flex items-center justify-center h-full text-gray-300"><i class="fa-solid fa-image text-2xl"></i></div>' : ''}
                                 <div class="absolute bottom-0 w-full h-2/3 bg-gradient-to-t from-black/70 to-transparent"></div>
@@ -805,7 +875,10 @@
                             </div>
                             <div class="p-2 flex-1 flex flex-col">
                                 <div class="flex justify-between items-center mb-1">
-                                    <span class="text-[8px] bg-gray-100 text-gray-500 px-1.5 rounded">${p.cat || 'عام'}</span>
+                                    <div class="flex items-center gap-1 max-w-[70%]">
+                                        <span class="text-[8px] bg-gray-100 text-gray-500 px-1.5 rounded whitespace-nowrap">${p.cat || 'عام'}</span>
+                                        ${shortDesc ? `<span class="text-[8px] text-gray-400 truncate border-r pr-1 border-gray-200">${shortDesc}</span>` : ''}
+                                    </div>
                                     <span class="num-en font-extrabold text-base ${isLow ? 'text-red-600' : 'text-gray-800'}">${p.qty}</span>
                                 </div>
                                 <div class="grid grid-cols-2 gap-1.5 mt-auto pt-1">
@@ -899,6 +972,7 @@
                 this.data.settings.categories = this.data.settings.categories.filter(x => x !== c);
                 DB.put('settings', this.data.settings);
                 this.renderSettings();
+                this.renderInventory();
             },
 
             switchTab(id) {
